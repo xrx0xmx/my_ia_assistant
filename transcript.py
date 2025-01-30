@@ -7,6 +7,14 @@ import os
 import argparse
 from typing import List
 from dataclasses import dataclass
+import logging
+
+# Configuración del logging al inicio del archivo, después de los imports
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 @dataclass
 class AudioConfig:
@@ -14,6 +22,7 @@ class AudioConfig:
     max_size_mb: int = 24
     model_name: str = "whisper-1"
     default_output: str = "transcripcion.txt"
+    prompt: str = "Esta es una transcripción de una conversación en español. Es una entrevista que realiza un consultor de sexo masculino a dos trabajadores de sexo femenino del cliente. Estamos en una fase de diagnositoc para una consultoria de transformación digital"
 
 class AudioFormatConverter:
     """Maneja la conversión de formatos de audio a WAV"""
@@ -29,13 +38,17 @@ class AudioFormatConverter:
         """
         try:
             audio_format = Path(audio_path).suffix.lower().replace('.', '')
+            logging.info(f"Iniciando conversión de archivo {audio_path} (formato: {audio_format})")
+            
             audio = AudioSegment.from_file(audio_path, format=audio_format)
             
             temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
             audio.export(temp_wav.name, format='wav')
+            logging.info(f"Archivo convertido exitosamente a WAV: {temp_wav.name}")
             return temp_wav.name
             
         except Exception as e:
+            logging.error(f"Error en la conversión del audio: {str(e)}")
             raise Exception(f"Error en la conversión del audio: {str(e)}")
 
 class AudioSegmenter:
@@ -55,12 +68,23 @@ class AudioSegmenter:
             wav_path = self._ensure_wav_format(audio_path)
             audio = AudioSegment.from_file(wav_path, format="wav")
             file_size_mb = Path(wav_path).stat().st_size / (1024 * 1024)
+            duration_seconds = len(audio) / 1000  # Convertir milisegundos a segundos
             
-            return [wav_path] if file_size_mb <= self.config.max_size_mb else self._create_segments(audio, file_size_mb)
+            logging.info(f"Tamaño del archivo de audio: {file_size_mb:.2f} MB")
+            logging.info(f"Duración del audio: {duration_seconds:.2f} segundos")
+            
+            if file_size_mb <= self.config.max_size_mb:
+                logging.info("El archivo no requiere segmentación")
+                return [wav_path]
+            else:
+                logging.info(f"Iniciando segmentación del archivo (tamaño máximo por segmento: {self.config.max_size_mb} MB)")
+                return self._create_segments(audio, file_size_mb)
             
         except FileNotFoundError:
+            logging.error(f"Archivo de audio no encontrado: {audio_path}")
             raise FileNotFoundError(f"Archivo de audio no encontrado: {audio_path}")
         except Exception as e:
+            logging.error(f"Error al segmentar el audio: {str(e)}")
             raise Exception(f"Error al segmentar el audio: {str(e)}")
 
     def _ensure_wav_format(self, audio_path: str) -> str:
@@ -71,15 +95,26 @@ class AudioSegmenter:
     def _create_segments(self, audio: AudioSegment, file_size_mb: float) -> List[str]:
         """Crea segmentos de audio basados en el tamaño máximo permitido"""
         segment_duration = (self.config.max_size_mb / file_size_mb) * len(audio)
+        segment_duration_seconds = segment_duration / 1000  # Convertir a segundos
         segments = []
+        total_segments = len(audio) // int(segment_duration) + 1
         
-        for start in range(0, len(audio), int(segment_duration)):
-            end = start + int(segment_duration)
+        logging.info(f"Creando {total_segments} segmentos...")
+        logging.info(f"Duración aproximada por segmento: {segment_duration_seconds:.2f} segundos")
+        
+        for i, start in enumerate(range(0, len(audio), int(segment_duration)), 1):
+            end = min(start + int(segment_duration), len(audio))
             segment = audio[start:end]
+            segment_length_seconds = len(segment) / 1000
             
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                 segment.export(temp_file.name, format='wav')
+                segment_size_mb = Path(temp_file.name).stat().st_size / (1024 * 1024)
                 segments.append(temp_file.name)
+                logging.info(f"Segmento {i}/{total_segments} creado:")
+                logging.info(f"  - Archivo: {temp_file.name}")
+                logging.info(f"  - Duración: {segment_length_seconds:.2f} segundos")
+                logging.info(f"  - Tamaño: {segment_size_mb:.2f} MB")
         
         return segments
 
@@ -121,7 +156,9 @@ class WhisperTranscriber:
             return openai.audio.transcriptions.create(
                 model=self.config.model_name,
                 file=audio,
-                response_format="text"
+                response_format="text",
+                language="es",
+                prompt=self.config.prompt
             )
 
 class TranscriptionManager:
@@ -170,12 +207,16 @@ def parse_arguments() -> argparse.Namespace:
                        help='Ruta al archivo de audio de entrada (formatos soportados: mp3, wav, ogg, flac, m4a, etc)')
     parser.add_argument('-o', '--output', default='output.txt',
                         help='Ruta del archivo de salida para la transcripción (por defecto: transcripcion.txt)')
+    parser.add_argument('-p', '--prompt',
+                        help='Prompt para guiar la transcripción (opcional)')
     return parser.parse_args()
 
 def main():
     """Función principal del programa"""
     args = parse_arguments()
     config = AudioConfig()
+    if args.prompt:
+        config.prompt = args.prompt
     
     try:
         manager = TranscriptionManager(config)
