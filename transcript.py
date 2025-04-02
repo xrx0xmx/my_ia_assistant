@@ -22,7 +22,7 @@ class AudioConfig:
     max_size_mb: int = 24
     model_name: str = "whisper-1"
     default_output: str = "transcripcion.txt"
-    prompt: str = "Esta es una transcripción de una conversación en español. Es una entrevista que realiza un consultor de sexo masculino a dos trabajadores de sexo femenino del cliente. Estamos en una fase de diagnositoc para una consultoria de transformación digital"
+    prompt: str = "Realizauna transcripción de una conversación en español. Es una entrevista que realiza un consultor de sexo masculino a dos trabajadores de la agencia Paladina Marketing. Se trata de la reunión inicial para realizar un diagnostico inicial de una servicio de asesoramiento en procesos de negocio"
 
 class AudioFormatConverter:
     """Maneja la conversión de formatos de audio a WAV"""
